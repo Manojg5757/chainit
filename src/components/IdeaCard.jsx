@@ -1,7 +1,9 @@
-import React from 'react';
-import { Tag, Calendar, User, LayoutGrid } from 'lucide-react';
+import React, { useState } from 'react';
+import { Tag, Calendar, User, LayoutGrid, BrainCircuit } from 'lucide-react';
+import TableQuiz from './TableQuiz';
 
 export default function IdeaCard({ idea }) {
+  const [quizMode, setQuizMode] = useState(false);
   const hasImage = !!idea.image_url;
   const hasTable = !!idea.table_data && idea.table_data.headers && idea.table_data.headers.length > 0;
 
@@ -42,12 +44,21 @@ export default function IdeaCard({ idea }) {
           </p>
         )}
 
-        {/* Optional Data Table */}
-        {hasTable && (
-          <div className="mt-2 mb-4 border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-            <div className="bg-slate-50 border-b border-slate-200 px-3 py-2 flex items-center gap-2">
-              <LayoutGrid className="w-4 h-4 text-blue-600" />
-              <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Structured Data</span>
+        {/* Optional Data Table OR Quiz Mode */}
+        {hasTable && !quizMode && (
+          <div className="mt-2 mb-4 border border-slate-200 rounded-xl overflow-hidden shadow-sm transition-all">
+            <div className="bg-slate-50 border-b border-slate-200 px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <LayoutGrid className="w-4 h-4 text-blue-600" />
+                <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Structured Data</span>
+              </div>
+              <button 
+                onClick={() => setQuizMode(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-200 hover:border-blue-400 hover:bg-blue-50 text-blue-700 rounded-lg text-xs font-bold uppercase tracking-wider shadow-sm transition-all"
+              >
+                <BrainCircuit className="w-3.5 h-3.5" />
+                Test Memory
+              </button>
             </div>
             <div className="overflow-x-auto p-1">
               <table className="w-full text-left text-sm whitespace-nowrap">
@@ -60,7 +71,7 @@ export default function IdeaCard({ idea }) {
                 </thead>
                 <tbody>
                   {idea.table_data.rows.map((row, i) => (
-                    <tr key={i} className="even:bg-slate-50/50">
+                    <tr key={i} className="even:bg-slate-50/50 hover:bg-blue-50/30 transition-colors">
                       {row.map((cell, j) => (
                         <td key={j} className="px-3 py-2 border-b border-r border-slate-50 last:border-r-0 text-slate-600">{cell}</td>
                       ))}
@@ -71,8 +82,15 @@ export default function IdeaCard({ idea }) {
             </div>
           </div>
         )}
+
+        {hasTable && quizMode && (
+          <TableQuiz 
+            tableData={idea.table_data} 
+            onExit={() => setQuizMode(false)} 
+          />
+        )}
         
-        <div className="mt-auto pt-4 border-t border-slate-100 flex items-center gap-2">
+        <div className="mt-auto pt-4 border-t border-slate-100 flex items-center gap-2 relative z-0">
           <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
             <User className="w-4 h-4" />
           </div>

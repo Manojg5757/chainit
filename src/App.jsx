@@ -1,55 +1,55 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Plus, Grid, List, Search, Loader2 } from 'lucide-react';
+import { Plus, Grid, Search, Loader2, LogOut, X } from 'lucide-react';
 import IdeaCard from './components/IdeaCard';
 import IdeaUploadForm from './components/IdeaUploadForm';
+import Auth from './components/Auth';
 import { supabase } from './lib/supabase';
-
-const INITIAL_IDEAS = [
-  {
-    id: '1',
-    title: 'How to restart router',
-    category: 'Technology',
-    subject: 'Networking',
-    description: 'Unplug the power cable from the back, wait 30 seconds, then plug it back in. Wait for all lights to turn green before testing connection.',
-    date: new Date(Date.now() - 86400000).toISOString(),
-    author: 'Admin'
-  },
-  {
-    id: '2',
-    title: 'Grocery List App Structure',
-    category: 'Engineering',
-    subject: 'System Design',
-    description: 'Need a users table, a lists table, and an items table. The items table should have a boolean "checked" state. Use React native for frontend.',
-    date: new Date(Date.now() - 172800000).toISOString(),
-    author: 'Dev'
-  },
-  {
-    id: '3',
-    title: 'Office Wifi Password',
-    category: 'General',
-    subject: 'Passwords',
-    description: 'Network: Guest_Network_5G\nPassword: CoffeeAndCode2024!',
-    date: new Date().toISOString(),
-    author: 'HR'
-  }
-];
+import imageCompression from 'browser-image-compression';
+import Logo from './assets/logo.png';
 
 const CATEGORIES = ['All', 'General', 'Science', 'Medical', 'Engineering', 'Technology', 'Productivity', 'Business', 'Arts', 'Personal', 'Other'];
 
 export default function App() {
-  const [ideas, setIdeas] = useState(INITIAL_IDEAS);
+  const [session, setSession] = useState(null);
+  const [ideas, setIdeas] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [isUploading, setIsUploading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isBackendConnected, setIsBackendConnected] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
+  
+  // Public Feed Control
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // Initial Fetch from Supabase
+  // Auth Initialization
+  useEffect(() => {
+    if (!supabase) {
+      setIsInitializing(false);
+      return;
+    }
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setIsInitializing(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) {
+        setShowAuthModal(false); // Close modal when logged in
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Fetch Ideas GLOBALLY
   useEffect(() => {
     async function fetchIdeas() {
-      if (!supabase) return; // Fallback to initial local state if no keys
-
+      if (!supabase) return;
       setIsLoading(true);
+
+      // NO user restriction here. Public Community Feed!
       const { data, error } = await supabase
         .from('ideas')
         .select('*')
@@ -57,16 +57,9 @@ export default function App() {
 
       if (error) {
         console.error('Error fetching Supabase data:', error);
-      } else if (data && data.length > 0) {
-        // Map postgres 'created_at' to expected 'date' prop locally
+      } else if (data) {
         const mappedData = data.map(i => ({...i, date: i.created_at}));
         setIdeas(mappedData);
-        setIsBackendConnected(true);
-      } else {
-        setIsBackendConnected(true);
-        // Supabase is connected but empty, let's just clear the initial mocks 
-        // to show a real blank slate.
-        setIdeas([]);
       }
       setIsLoading(false);
     }
@@ -74,28 +67,47 @@ export default function App() {
     fetchIdeas();
   }, []);
 
+  const handleSignOut = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+  };
+
   const handlePostIdea = async (formDataPayload) => {
     const { imageFile, ...baseData } = formDataPayload;
     
     let imageUrl = null;
 
-    // 1. Handle File Upload if Supabase is connected
-    if (imageFile && supabase) {
-      const fileExt = imageFile.name.split('.').pop();
+    if (imageFile && supabase && session) {
+      // 1. FREE-TIER OPTIMIZATION: Compress Image before upload
+      let fileToUpload = imageFile;
+      const compressionOptions = {
+        maxSizeMB: 0.8, // Force under 800KB
+        maxWidthOrHeight: 1200,
+        useWebWorker: true,
+      };
+
+      try {
+        fileToUpload = await imageCompression(imageFile, compressionOptions);
+      } catch (error) {
+        console.warn("Compression failed, proceeding with original.", error);
+      }
+
+      const fileExt =  imageFile.name.split('.').pop() || 'png';
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
-      const filePath = `public/${fileName}`;
+      // Segregate storage by user_id
+      const filePath = `${session.user.id}/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from('idea-photos')
-        .upload(filePath, imageFile);
+        .upload(filePath, fileToUpload);
 
       if (uploadError) {
         console.error('Error uploading image:', uploadError);
-        alert('Failed to upload image. Please check your Supabase Storage policies.');
-        return; // Halt if upload fails
+        alert('Failed to upload image. Please check your Supabase Storage limits.');
+        return; 
       }
 
-      // Get public URL
       const { data: publicUrlData } = supabase.storage
         .from('idea-photos')
         .getPublicUrl(filePath);
@@ -103,53 +115,62 @@ export default function App() {
       imageUrl = publicUrlData.publicUrl;
     }
 
-    // fallback object shape
+    const newIdeaLabel = session?.user?.email?.split('@')[0] || 'User';
+
     const newIdea = {
-      ...baseData,
+      title: baseData.title,
+      description: baseData.description,
+      category: baseData.category,
+      subject: baseData.subject,
+      author: newIdeaLabel,
+      table_data: baseData.table_data,
       image_url: imageUrl,
-      // override dummy ids if using supabase
+      user_id: session?.user?.id
     };
 
-    // 2. Insert to Database
-    if (supabase) {
+    if (supabase && session) {
       const { data, error } = await supabase
         .from('ideas')
-        .insert([{
-          title: newIdea.title,
-          description: newIdea.description,
-          category: newIdea.category,
-          subject: newIdea.subject,
-          author: newIdea.author,
-          table_data: newIdea.table_data,
-          image_url: newIdea.image_url
-        }])
+        .insert([newIdea])
         .select()
         .single();
         
       if (error) {
         console.error('Error inserting idea:', error);
-        alert('Failed to post idea to database. Check RLS policies.');
+        alert('Failed to post idea to database.');
+        setIsUploading(false);
         return;
       }
       
-      // Prepend the new saved idea to state
       setIdeas([{...data, date: data.created_at}, ...ideas]);
-    } else {
-      // Local fallback
-      // Since it's local, imageFile preview URL was created in the form but we need to create it here to persist locally as blob
-      if (imageFile) {
-         newIdea.image_url = URL.createObjectURL(imageFile);
-      }
-      setIdeas([newIdea, ...ideas]);
     }
 
     setIsUploading(false);
   };
 
+  if (isInitializing) {
+    return <div className="min-h-screen bg-slate-50 flex items-center justify-center font-sans"><Loader2 className="w-8 h-8 text-blue-500 animate-spin" /></div>;
+  }
+
+  // Intercept Render with full-screen Auth Modal if triggered
+  if (showAuthModal) {
+    return (
+      <div className="relative min-h-screen bg-slate-50">
+        <button 
+          onClick={() => setShowAuthModal(false)}
+          className="absolute top-6 right-6 z-50 flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur border border-slate-200 text-slate-600 hover:text-slate-900 rounded-xl font-bold shadow-sm transition-all"
+        >
+          <X className="w-5 h-5" /> Cancel
+        </button>
+        <Auth />
+      </div>
+    );
+  }
+
   const filteredIdeas = ideas.filter(idea => {
     const matchesCategory = selectedCategory === 'All' || idea.category === selectedCategory;
     const matchesSearch = idea.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          idea.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          (idea.description && idea.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
                           (idea.subject && idea.subject.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesCategory && matchesSearch;
   });
@@ -157,36 +178,47 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-500/30">
       
-      {/* HEADER NAV */}
       <nav className="fixed top-0 inset-x-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200 shadow-sm">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3 text-slate-900 cursor-pointer" onClick={() => {setIsUploading(false); setSelectedCategory('All');}}>
-            <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-600/30">
-              <Sparkles className="w-4 h-4 text-white" />
+            <div className="w-10 h-10 flex items-center justify-center bg-white rounded-xl shadow-sm border border-slate-100 p-1">
+              <img src={Logo} className="w-full h-full object-contain" alt="Logo" />
             </div>
             <span className="font-extrabold tracking-tight text-xl text-slate-800">
               Chain It
             </span>
-            {isBackendConnected && (
-              <span className="ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase tracking-wider rounded-md border border-emerald-200">
-                Live
-              </span>
-            )}
           </div>
 
-          {!isUploading && (
-            <button 
-              onClick={() => setIsUploading(true)}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md transition-all shadow-blue-600/20"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">Add Idea</span>
-            </button>
-          )}
+          <div className="flex items-center gap-4">
+            {session ? (
+              <button 
+                onClick={handleSignOut}
+                className="text-slate-500 hover:text-red-500 text-sm font-bold flex items-center gap-1.5 transition-colors"
+              >
+                <LogOut className="w-4 h-4" /> <span className="hidden sm:inline">Log out</span>
+              </button>
+            ) : (
+               <button 
+                onClick={() => setShowAuthModal(true)}
+                className="text-blue-600 hover:text-blue-700 text-sm font-bold flex items-center gap-1.5 transition-colors"
+              >
+                Sign In
+              </button>
+            )}
+
+            {!isUploading && (
+              <button 
+                onClick={() => session ? setIsUploading(true) : setShowAuthModal(true)}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md transition-all shadow-blue-600/20"
+              >
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">Add Idea</span>
+              </button>
+            )}
+          </div>
         </div>
       </nav>
 
-      {/* MAIN CONTENT AREA */}
       <main className="max-w-6xl mx-auto px-4 pt-28 pb-24 relative z-10 flex flex-col md:flex-row gap-8">
         
         {isUploading ? (
@@ -198,8 +230,21 @@ export default function App() {
           </div>
         ) : (
           <>
-            {/* SIDEBAR */}
-            <aside className="w-full md:w-64 flex-shrink-0">
+            <div className="md:hidden w-full mb-2">
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="w-full bg-white border border-slate-200 focus:border-blue-400 focus:ring-4 focus:ring-blue-100 rounded-xl px-4 py-3 text-slate-800 font-semibold outline-none transition-all appearance-none cursor-pointer shadow-sm"
+              >
+                {CATEGORIES.map(cat => (
+                  <option key={cat} value={cat}>
+                    {cat} ({cat === 'All' ? ideas.length : ideas.filter(i => i.category === cat).length})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <aside className="hidden md:block w-64 flex-shrink-0">
               <div className="sticky top-28 bg-white border border-slate-200 rounded-3xl p-5 shadow-lg shadow-slate-200/40">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 px-2">Categories</h3>
                 <div className="flex flex-col gap-1">
@@ -226,11 +271,10 @@ export default function App() {
               </div>
             </aside>
 
-            {/* FEED */}
             <div className="flex-1">
               <div className="mb-6 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
                 <h2 className="text-2xl font-extrabold text-slate-800 flex items-center gap-3">
-                  {selectedCategory === 'All' ? 'All Ideas' : `${selectedCategory} Ideas`}
+                  {selectedCategory === 'All' ? 'Community Ideas' : `${selectedCategory} Ideas`}
                   {isLoading && <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />}
                 </h2>
                 
@@ -259,10 +303,10 @@ export default function App() {
                   <p className="text-slate-500 mb-6 max-w-sm mx-auto">
                     {searchQuery 
                       ? `We couldn't find any ideas matching "${searchQuery}" in ${selectedCategory}.` 
-                      : `You haven't posted any ideas in the ${selectedCategory} category yet.`}
+                      : `The community hasn't posted any ideas in the ${selectedCategory} category yet.`}
                   </p>
                   <button 
-                    onClick={() => setIsUploading(true)}
+                    onClick={() => session ? setIsUploading(true) : setShowAuthModal(true)}
                     className="text-blue-600 font-bold hover:text-blue-700 hover:underline"
                   >
                     Post the first one →
@@ -275,7 +319,6 @@ export default function App() {
 
       </main>
 
-      {/* BACKGROUND EFFECTS */}
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
          <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-blue-400/20 blur-[120px]" />
          <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-cyan-400/20 blur-[150px]" />

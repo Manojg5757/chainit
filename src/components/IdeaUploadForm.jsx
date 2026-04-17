@@ -17,7 +17,7 @@ export default function IdeaUploadForm({ onSubmit, onCancel }) {
   // Table Builder State
   const [includeTable, setIncludeTable] = useState(false);
   const [tableData, setTableData] = useState({
-    headers: ['Item 1', 'Item 2'],
+    headers: ['Idea', 'To Remember'],
     rows: [['', '']]
   });
 
