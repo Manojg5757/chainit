@@ -115,7 +115,7 @@ export default function App() {
       imageUrl = publicUrlData.publicUrl;
     }
 
-    const newIdeaLabel = session?.user?.email?.split('@')[0] || 'User';
+    const newIdeaLabel = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'User';
 
     const newIdea = {
       title: baseData.title,
@@ -191,12 +191,25 @@ export default function App() {
 
           <div className="flex items-center gap-4">
             {session ? (
-              <button 
-                onClick={handleSignOut}
-                className="text-slate-500 hover:text-red-500 text-sm font-bold flex items-center gap-1.5 transition-colors"
-              >
-                <LogOut className="w-4 h-4" /> <span className="hidden sm:inline">Log out</span>
-              </button>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 border-r border-slate-200 pr-3">
+                  <img 
+                    src={session.user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.email}`} 
+                    className="w-8 h-8 rounded-full border border-slate-200"
+                    alt="Profile"
+                  />
+                  <span className="text-sm font-bold text-slate-700 hidden sm:block truncate max-w-[120px]">
+                    {session.user.user_metadata?.full_name || session.user.email?.split('@')[0]}
+                  </span>
+                </div>
+                <button 
+                  onClick={handleSignOut}
+                  className="text-slate-400 hover:text-red-500 p-1 rounded-md transition-colors"
+                  title="Log out"
+                >
+                  <LogOut className="w-5 h-5" />
+                </button>
+              </div>
             ) : (
                <button 
                 onClick={() => setShowAuthModal(true)}
